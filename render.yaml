@@ -3,8 +3,8 @@ services:
     name: universal-downloader-api
     env: node
     plan: free
-    buildCommand: npm install && mkdir -p bin && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o bin/yt-dlp && chmod a+rx bin/yt-dlp
-    startCommand: node index.js
+    buildCommand: "npm install && mkdir -p bin && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o bin/yt-dlp && chmod a+rx bin/yt-dlp"
+    startCommand: "node index.js"
     envVars:
       - key: PATH
-        value: /opt/render/project/src/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        value: "/opt/render/project/src/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
