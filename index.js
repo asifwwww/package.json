@@ -1,78 +1,84 @@
-const express = require('express');
-const cors = require('cors');
-const { exec } = require('child_process');
+// Configured live Render backend link from your active deployment
+const MY_RENDER_API = 'https://video-downloader-fkzl.onrender.com';
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+async function fireCloudExtraction() {
+    const inputUrl = document.getElementById('targetLink').value.trim();
+    const logs = document.getElementById('loaderLogs');
+    const resBox = document.getElementById('resultContainer');
+    const btn = document.getElementById('runBtn');
 
-// Main Dynamic Extraction Endpoint
-app.get('/api/extract', (req, res) => {
-    const videoUrl = req.query.url;
-
-    if (!videoUrl) {
-        return res.status(400).json({ success: false, message: "URL parameter is required." });
+    // 1. Validation Check
+    if (!inputUrl) {
+        logs.style.color = "#ef4444";
+        logs.innerText = "Please input a live media URL link first.";
+        return;
     }
 
-    console.log(`[*] Processing cloud extraction request for: ${videoUrl}`);
+    // 2. Loading State Initialization
+    logs.style.color = "#6366f1";
+    logs.innerText = "🔄 Connecting to your cloud server... (Note: If server was sleeping, it might take up to 30-50 seconds to wake up for the first request).";
+    resBox.style.display = "none";
+    btn.disabled = true;
 
-    // yt-dlp command to dump all raw metadata as clear JSON format
-    const command = `yt-dlp --dump-json --no-warnings "${videoUrl}"`;
+    try {
+        // 3. API Fetch Request with standard endpoint structure
+        const endpoint = `${MY_RENDER_API}/api/extract?url=${encodeURIComponent(inputUrl)}`;
+        const response = await fetch(endpoint);
+        const data = await response.json();
 
-    exec(command, { maxBuffer: 1024 * 1024 * 50 }, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`[-] yt-dlp Execution Error: ${error.message}`);
-            return res.status(500).json({ success: false, message: "Failed to parse video. Link might be private or unsupported." });
-        }
-
-        try {
-            const rawData = JSON.parse(stdout);
+        // 4. Checking Success Response Package
+        if (data && data.success) {
+            logs.innerText = ""; // Clear logs on success
             
-            // 1. Extract All Available Formats (Video, Audio, Different Qualities)
-            const formatsDeck = [];
-            if (rawData.formats) {
-                rawData.formats.forEach(f => {
-                    // Filter tracking formats that contain direct download links
-                    if (f.url && (f.vcodec !== 'none' || f.acodec !== 'none')) {
-                        formatsDeck.push({
-                            formatId: f.format_id,
-                            extension: f.ext || 'mp4',
-                            resolution: f.resolution || (f.acodec !== 'none' && f.vcodec === 'none' ? 'Audio Only' : 'Dynamic'),
-                            qualityLabel: f.format_note || `${f.height ? f.height + 'p' : 'HQ'}`,
-                            fileSize: f.filesize ? (f.filesize / (1024 * 1024)).toFixed(2) + ' MB' : 'Unknown',
-                            downloadLink: f.url,
-                            type: f.vcodec === 'none' ? 'Audio' : 'Video'
-                        });
-                    }
-                });
+            // Set dynamic metadata fields
+            document.getElementById('mediaTitle').innerText = data.title;
+            document.getElementById('metaPlatform').innerText = data.platform.toUpperCase();
+            document.getElementById('metaDuration').innerText = data.duration;
+            
+            // Setup thumbnail display and thumbnail download link
+            document.getElementById('mediaThumb').src = data.thumbnail;
+            document.getElementById('dlThumbBtn').href = data.thumbnail;
+
+            // Setup quick high-quality download triggers
+            const quickDeck = document.getElementById('quickDeck');
+            quickDeck.innerHTML = '';
+            
+            if (data.bestVideoLink) {
+                quickDeck.innerHTML += `<a href="${data.bestVideoLink}" target="_blank" class="dl-badge prime-type">🎬 Download Highest Video (HD)</a>`;
+            }
+            if (data.bestAudioLink) {
+                quickDeck.innerHTML += `<a href="${data.bestAudioLink}" target="_blank" class="dl-badge prime-type audio-type">🎵 Download Best Audio (MP3/M4A)</a>`;
             }
 
-            // 2. Extract Highest Quality Links Directly
-            const highestVideo = formatsDeck.filter(f => f.type === 'Video').sort((a,b) => (parseInt(b.qualityLabel) || 0) - (parseInt(a.qualityLabel) || 0))[0];
-            const highestAudio = formatsDeck.filter(f => f.type === 'Audio')[0];
+            // Populate all available formats dynamically inside the responsive table
+            const tableBody = document.getElementById('formatsTableBody');
+            tableBody.innerHTML = '';
+            
+            data.allAvailableFormats.forEach(stream => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td style="font-weight:bold; color: ${stream.type === 'Audio' ? '#f59e0b':'#10b981'};">${stream.type}</td>
+                    <td>${stream.qualityLabel} (${stream.resolution})</td>
+                    <td style="text-transform:uppercase;">${stream.extension}</td>
+                    <td>${stream.fileSize}</td>
+                    <td><a href="${stream.downloadLink}" target="_blank" class="dl-badge ${stream.type === 'Audio' ? 'audio-type':''}">Download</a></td>
+                `;
+                tableBody.appendChild(row);
+            });
 
-            // 3. Compile Master Clean JSON Package to feed into Blogger Page
-            const cleanPayload = {
-                success: true,
-                title: rawData.title || "Universal Cloud Media",
-                duration: rawData.duration ? `${Math.floor(rawData.duration / 60)}m ${rawData.duration % 60}s` : 'Unknown',
-                thumbnail: rawData.thumbnail || (rawData.thumbnails && rawData.thumbnails.length > 0 ? rawData.thumbnails[rawData.thumbnails.length - 1].url : ''),
-                platform: rawData.extractor_key || 'Generic Direct Source',
-                bestVideoLink: highestVideo ? highestVideo.downloadLink : null,
-                bestAudioLink: highestAudio ? highestAudio.downloadLink : null,
-                allAvailableFormats: formatsDeck
-            };
-
-            return res.json(cleanPayload);
-
-        } catch (parseError) {
-            console.error(`[-] JSON Parsing Matrix Failure: ${parseError.message}`);
-            return res.status(500).json({ success: false, message: "Error compiling structural metadata." });
+            // Make the result container visible smoothly
+            resBox.style.display = "block";
+        } else {
+            logs.style.color = "#ef4444";
+            logs.innerText = "API parsing block error. Please double-check the link privacy settings or try another video.";
         }
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Your Personal Video Downloader Engine Running on Port ${PORT}`);
-});
+    } catch (err) {
+        // Detailed error fallback if connection fails or timeouts
+        logs.style.color = "#ef4444";
+        logs.innerText = "Cloud connection failed. Please open your backend link once directly in a new tab to wake it up, then try again.";
+        console.error("Extraction error log:", err);
+    } finally {
+        // Re-enable button after operation completes
+        btn.disabled = false;
+    }
+}
